@@ -224,6 +224,9 @@ def crear_nota(nota_data: NotaVentaCreate):
     
     return {"mensaje": "nota creada y encolada para notificacion", "folio": folio}
 
+def s3_client():
+    return boto3.client('s3', region_name=REGION)
+
 @app.get("/notas/{rfc_cliente}/{folio}/descargar")
 def descargar_pdf(rfc_cliente: str, folio: str):
     client = s3_client()
