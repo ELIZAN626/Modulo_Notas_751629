@@ -22,7 +22,7 @@ CONTENIDO_NOTA_TABLE = os.getenv("CONTENIDO_NOTA_TABLE", "contenido_nota")
 CLIENTES_TABLE = os.getenv("CLIENTES_TABLE", "clientes")
 DOMICILIOS_TABLE = os.getenv("DOMICILIOS_TABLE", "domicilios")
 PRODUCTOS_TABLE = os.getenv("PRODUCTOS_TABLE", "productos")
-ENVIRONMENT = os.getenv("ENVIRONMENT", "local") # discernimiento de ambiente para metricas
+ENVIRONMENT = os.getenv("ENVIRONMENT", "local")
 
 app = FastAPI(title="API de Notas de Venta")
 cloudwatch = boto3.client('cloudwatch', region_name=REGION)
@@ -94,8 +94,8 @@ def _get_item(table_name: str, key: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 class ContenidoNotaBase(BaseModel):
     id_producto: str
-    cantidad: int
-    precio_unitario: float
+    cantidad: int = Field(gt=0, description="debe ser mayor que cero")
+    precio_unitario: float = Field(gt=0, description="debe ser mayor que cero")
 
     @property
     def importe(self) -> float:
@@ -159,11 +159,49 @@ def enviar_mensaje_sqs(folio: str, total: float, rfc_cliente: str):
 def crear_nota(nota_data: NotaVentaCreate):
     cliente = _get_item(CLIENTES_TABLE, {'id': nota_data.id_cliente})
     if not cliente:
-        raise HTTPException(status_code=400, detail="cliente no encontrado")
-    
+        raise HTTPException(
+            status_code=404,
+            detail=f"No existe un cliente con id '{nota_data.id_cliente}'.",
+        )
+
+    if not nota_data.productos:
+        raise HTTPException(
+            status_code=400,
+            detail="La nota debe incluir al menos un producto.",
+        )
+
     dir_fact = _get_item(DOMICILIOS_TABLE, {'id': nota_data.id_direccion_facturacion})
+    if not dir_fact:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No existe un domicilio de facturación con id '{nota_data.id_direccion_facturacion}'.",
+        )
+    if dir_fact.get('id_cliente') != nota_data.id_cliente:
+        raise HTTPException(
+            status_code=400,
+            detail="La dirección de facturación no pertenece al cliente indicado.",
+        )
+
     dir_env = _get_item(DOMICILIOS_TABLE, {'id': nota_data.id_direccion_envio})
-    
+    if not dir_env:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No existe un domicilio de envío con id '{nota_data.id_direccion_envio}'.",
+        )
+    if dir_env.get('id_cliente') != nota_data.id_cliente:
+        raise HTTPException(
+            status_code=400,
+            detail="La dirección de envío no pertenece al cliente indicado.",
+        )
+
+    for linea in nota_data.productos:
+        producto = _get_item(PRODUCTOS_TABLE, {'id': linea.id_producto})
+        if not producto:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No existe un producto con id '{linea.id_producto}'.",
+            )
+
     folio = f"F-{uuid.uuid4().hex[:8].upper()}"
     
     total = sum(p.cantidad * p.precio_unitario for p in nota_data.productos)
@@ -185,3 +223,31 @@ def crear_nota(nota_data: NotaVentaCreate):
     enviar_mensaje_sqs(folio, total, cliente['rfc'])
     
     return {"mensaje": "nota creada y encolada para notificacion", "folio": folio}
+
+@app.get("/notas/{rfc_cliente}/{folio}/descargar")
+def descargar_pdf(rfc_cliente: str, folio: str):
+    client = s3_client()
+    key_s3 = f"{rfc_cliente}/{folio}.pdf"
+    try:
+        # intentar obtener el objeto de S3
+        response_s3 = client.get_object(Bucket=BUCKET_NAME, Key=key_s3)
+        pdf_content = response_s3['Body'].read()
+        
+        # actualizar metadatos (Factor: Persistencia/Estado)
+        client.copy_object(
+            Bucket=BUCKET_NAME,
+            Key=key_s3,
+            CopySource={'Bucket': BUCKET_NAME, 'Key': key_s3},
+            Metadata={**response_s3['Metadata'], 'nota-descargada': 'true'},
+            MetadataDirective='REPLACE'
+        )
+        
+        return Response(
+            content=pdf_content,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename={folio}.pdf"}
+        )
+    except ClientError as e:
+        if e.response['Error']['Code'] == "NoSuchKey":
+            raise HTTPException(status_code=404, detail="El PDF no existe en S3.")
+        raise HTTPException(status_code=500, detail=str(e))
