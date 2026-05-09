@@ -1,0 +1,7 @@
+
+fastapi==0.99.1
+uvicorn[standard]==0.24.0
+boto3>=1.28.0,<2
+pydantic==1.10.13
+reportlab>=4.0.0,<5
+requests>=2.31.0,<3
