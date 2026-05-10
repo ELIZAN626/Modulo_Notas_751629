@@ -14,7 +14,8 @@ jobs:
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
       - name: Build and Push
         run: |
-          IMAGE_ID=ghcr.io/${{ github.repository_owner }}/api-notas:latest
+          REPO_LOWER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE_ID=ghcr.io/$REPO_LOWER/api-notas:latest
           docker build -t $IMAGE_ID .
           docker push $IMAGE_ID
       - name: Deploy to EC2
@@ -24,12 +25,13 @@ jobs:
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
+            REPO_LOWER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
             echo "${{ secrets.GH_PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             docker stop api-notas || true
             docker rm api-notas || true
-            docker pull ghcr.io/${{ github.repository_owner }}/api-notas:latest
+            docker pull ghcr.io/$REPO_LOWER/api-notas:latest
             docker run -d --name api-notas -p 8001:8001 \
               -e AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }} \
               -e AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }} \
               -e AWS_SESSION_TOKEN=${{ secrets.AWS_SESSION_TOKEN }} \
-              ghcr.io/${{ github.repository_owner }}/api-notas:latest
+              ghcr.io/$REPO_LOWER/api-notas:latest
