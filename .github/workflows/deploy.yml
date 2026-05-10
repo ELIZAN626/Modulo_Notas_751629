@@ -4,6 +4,10 @@ on:
   push:
     branches: [ main ]
 
+permissions:
+  packages: write
+  contents: read
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -11,7 +15,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Login to GitHub Container Registry
+      - name: Login to GHCR
+        # Usamos tu GH_PAT para asegurar permisos de escritura
         run: echo "${{ secrets.GH_PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
       - name: Build and Push
@@ -30,13 +35,9 @@ jobs:
             REPO_LOWER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
             echo "${{ secrets.GH_PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             
-            # Limpieza total del puerto 8001
+            # Limpieza del puerto 8001
             docker stop $(docker ps -q --filter "publish=8001") || true
             docker rm $(docker ps -aq --filter "publish=8001") || true
-            
-            # Limpieza por nombre
-            docker stop api-notas || true
-            docker rm api-notas || true
             
             docker pull ghcr.io/$REPO_LOWER/api-notas:latest
             
