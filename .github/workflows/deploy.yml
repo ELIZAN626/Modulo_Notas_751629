@@ -1,18 +1,22 @@
-name: Deploy Notas
+name: Deploy Notas to GHCR
 on:
   push:
     branches: [ main ]
+permissions:
+  packages: write
+  contents: read
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - name: Login Docker Hub
-        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
       - name: Build and Push
         run: |
-          docker build -t ${{ secrets.DOCKER_USERNAME }}/api-notas .
-          docker push ${{ secrets.DOCKER_USERNAME }}/api-notas
+          IMAGE_ID=ghcr.io/${{ github.repository_owner }}/api-notas:latest
+          docker build -t $IMAGE_ID .
+          docker push $IMAGE_ID
       - name: Deploy to EC2
         uses: appleboy/ssh-action@master
         with:
@@ -20,11 +24,12 @@ jobs:
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
+            echo "${{ secrets.GH_PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             docker stop api-notas || true
             docker rm api-notas || true
-            docker pull ${{ secrets.DOCKER_USERNAME }}/api-notas
+            docker pull ghcr.io/${{ github.repository_owner }}/api-notas:latest
             docker run -d --name api-notas -p 8001:8001 \
               -e AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }} \
               -e AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }} \
               -e AWS_SESSION_TOKEN=${{ secrets.AWS_SESSION_TOKEN }} \
-              ${{ secrets.DOCKER_USERNAME }}/api-notas
+              ghcr.io/${{ github.repository_owner }}/api-notas:latest
